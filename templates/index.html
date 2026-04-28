@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kakovost zraka v Sloveniji</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" data-cfasync="false"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js" data-cfasync="false"></script>
+
+  <link rel="stylesheet" href="/static/css/style.css?v=4" />
+</head>
+<body>
+
+  <div id="header">
+    <div id="header-left">
+      <span id="title">Kakovost zraka v Sloveniji</span>
+      <span id="subtitle">ARSO · Sensor.Community · OpenSenseMap · PurpleAir · AQICN</span>
+    </div>
+
+    <div id="legend">
+      <span class="leg" style="--c:#00c400"><span>Dobro</span></span>
+      <span class="leg" style="--c:#e8c300"><span>Zmerno</span></span>
+      <span class="leg" style="--c:#ff7e00"><span>Nezdravo·Ob</span></span>
+      <span class="leg" style="--c:#e00000"><span>Nezdravo</span></span>
+      <span class="leg" style="--c:#8f3f97"><span>Zelo nezdravo</span></span>
+      <span class="leg" style="--c:#7e0023"><span>Nevarno</span></span>
+      <span class="leg" style="--c:#aaaaaa"><span>Ni podatkov</span></span>
+    </div>
+
+    <div id="header-right">
+      <button class="icon-btn" id="btn-theme" onclick="toggleTheme()">🌙 Temno</button>
+      <button class="icon-btn" id="btn-lang"  onclick="toggleLang()">EN</button>
+    </div>
+  </div>
+
+  <!-- map-wrap: position:relative container; #map fills it; overlays sit beside it -->
+  <div id="map-wrap">
+    <div id="map"></div>
+
+    <!-- Status bar -->
+    <div id="statusbar">–</div>
+
+    <!-- Station panel -->
+    <div id="panel" class="panel hidden">
+      <button id="panel-close" onclick="closePanel()">✕</button>
+      <div id="panel-content"></div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading">
+      <div class="spinner"></div>
+      <div id="loading-text">Nalaganje postaj…</div>
+    </div>
+  </div>
+
+  <script src="/static/js/map.js?v=4" data-cfasync="false"></script>
+</body>
+</html>

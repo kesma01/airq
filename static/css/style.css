@@ -1,0 +1,382 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Full-height root — needed for reliable % height on iOS WebKit */
+html, body { height: 100%; }
+
+/* ── Theme variables ──────────────────────────────────────────────────────── */
+:root {
+  --bg:      #f4f6fb;
+  --card:    #ffffff;
+  --border:  #dde2f0;
+  --text:    #1a1d2e;
+  --subtext: #5a5e78;
+  --accent:  #4c6ef5;
+  --tile:    "light";
+  --shadow:  0 1px 6px rgba(0,0,0,0.10);
+  --marker-border: rgba(0,0,0,0.25);
+}
+
+[data-theme="dark"] {
+  --bg:      #0f1117;
+  --card:    #1a1d27;
+  --border:  #2a2d3a;
+  --text:    #e8eaf0;
+  --subtext: #8b8fa8;
+  --accent:  #5c7cfa;
+  --shadow:  0 1px 6px rgba(0,0,0,0.45);
+  --marker-border: rgba(0,0,0,0.4);
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  /* 100% of <html> which is 100% of viewport — avoids iOS 100vh chrome-overlap bug */
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+#header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  min-height: 46px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  z-index: 1000;
+  box-shadow: var(--shadow);
+}
+
+#header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+#title {
+  font-size: 1rem;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+#subtitle {
+  font-size: 0.72rem;
+  color: var(--subtext);
+  white-space: nowrap;
+  display: none;
+}
+@media (min-width: 860px) { #subtitle { display: inline; } }
+
+#header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Legend ──────────────────────────────────────────────────────────────── */
+#legend {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  overflow-x: auto;
+  flex: 1;
+  justify-content: center;
+  /* on mobile this row spans full width below title+buttons */
+}
+
+.leg {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--subtext);
+  white-space: nowrap;
+}
+.leg::before {
+  content: "";
+  display: inline-block;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--c);
+  flex-shrink: 0;
+}
+
+/* Mobile: push legend onto its own row */
+@media (max-width: 640px) {
+  #header {
+    padding: 6px 12px;
+  }
+  #header-left {
+    flex: 1;
+    min-width: 0;
+  }
+  #title {
+    font-size: 0.88rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #legend {
+    order: 10;          /* after header-right */
+    width: 100%;
+    flex: none;
+    justify-content: flex-start;
+    padding-bottom: 2px;
+    gap: 6px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .leg { font-size: 0.65rem; }
+}
+
+/* ── Icon buttons (theme / lang) ────────────────────────────────────────── */
+.icon-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--subtext);
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.icon-btn:hover { background: var(--border); color: var(--text); }
+
+/* ── Map ──────────────────────────────────────────────────────────────────── */
+/* map-wrap is the flex child that grows; map fills it; overlays sit beside map
+   so they are NOT inside leaflet-container (which has overflow:hidden).
+   min-height:0 is required so WebKit flex children can shrink below content height.
+   #map uses absolute positioning so % height resolves correctly on iOS. */
+#map-wrap {
+  flex: 1 1 0;       /* flex-basis:0 so it always yields to sibling sizes */
+  min-height: 0;     /* critical WebKit flex fix */
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+}
+#map {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+}
+.leaflet-container { background: var(--bg); }
+
+/* ── Markers ──────────────────────────────────────────────────────────────── */
+.aqi-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-weight: 700;
+  color: #111;
+  border: 2px solid var(--marker-border);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+  cursor: pointer;
+  transition: transform 0.12s;
+  font-size: 0.68rem;
+  line-height: 1;
+}
+.aqi-marker:hover { transform: scale(1.2); }
+.aqi-marker.no-data { color: #777; }
+
+/* Stale marker: dashed grey border, slightly faded */
+.aqi-marker.stale {
+  border: 2px dashed rgba(120,120,120,0.8) !important;
+  opacity: 0.6;
+}
+
+/* Ensure iOS tap is not swallowed by Leaflet's touch handler */
+.leaflet-marker-icon { touch-action: none; }
+
+/* ── Side panel ──────────────────────────────────────────────────────────── */
+.panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 310px;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  z-index: 900;
+  padding: 16px 14px 24px;
+  transition: transform 0.22s ease;
+}
+.panel.hidden { transform: translateX(100%); }
+
+/* Mobile: slide up from bottom, full width */
+@media (max-width: 640px) {
+  .panel {
+    top: auto;
+    bottom: 0;
+    right: 0;
+    left: 0;
+    width: 100%;
+    height: auto;
+    max-height: 65vh;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    border-radius: 14px 14px 0 0;
+    transition: transform 0.25s ease;
+  }
+  .panel.hidden {
+    transform: translateY(100%);
+  }
+}
+
+#panel-close {
+  position: absolute;
+  top: 10px; right: 12px;
+  background: none; border: none;
+  color: var(--subtext);
+  font-size: 1rem; cursor: pointer;
+}
+#panel-close:hover { color: var(--text); }
+
+.p-source {
+  font-size: 0.66rem; color: var(--subtext);
+  text-transform: uppercase; letter-spacing: 0.8px;
+  margin-bottom: 2px;
+}
+.p-name {
+  font-size: 0.96rem; font-weight: 700;
+  margin-bottom: 10px; line-height: 1.3;
+  color: var(--text);
+}
+.p-aqi-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 14px; border-radius: 20px;
+  font-weight: 700; font-size: 0.85rem;
+  margin-bottom: 12px; color: #111;
+}
+.p-aqi-value { font-size: 1.35rem; }
+
+.p-readings {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 7px; margin-bottom: 14px;
+}
+.p-reading {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px; padding: 7px 9px;
+}
+/* Reading as interactive button */
+button.p-reading {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.13s, box-shadow 0.13s, background 0.13s;
+}
+button.p-reading:hover {
+  border-color: var(--accent);
+  background: var(--card);
+}
+button.p-reading.active {
+  border-color: var(--accent);
+  background: var(--card);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.p-reading-label {
+  font-size: 0.64rem; color: var(--subtext);
+  text-transform: uppercase; letter-spacing: 0.4px;
+  margin-bottom: 1px;
+}
+.p-reading-value { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+
+.p-stale-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: color-mix(in srgb, #e8c300 12%, var(--bg));
+  border: 1px solid #c8a800;
+  border-radius: 7px;
+  padding: 5px 9px;
+  font-size: 0.7rem;
+  color: #7a6000;
+  margin-bottom: 10px;
+}
+[data-theme="dark"] .p-stale-banner {
+  background: color-mix(in srgb, #e8c300 8%, var(--bg));
+  border-color: #5a4800;
+  color: #c8a800;
+}
+
+.p-meta {
+  font-size: 0.73rem; color: var(--subtext);
+  margin-bottom: 12px; line-height: 1.65;
+}
+.p-meta strong { color: var(--text); }
+
+.p-chart-title {
+  font-size: 0.72rem; color: var(--subtext);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.p-chart-wrap {
+  position: relative; height: 110px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px; padding: 6px;
+}
+.p-no-history {
+  font-size: 0.76rem; color: var(--subtext); font-style: italic;
+  padding: 8px 0;
+}
+
+/* ── Status bar ──────────────────────────────────────────────────────────── */
+#statusbar {
+  position: absolute;
+  bottom: 24px; left: 50%;
+  transform: translateX(-50%);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: 0.7rem;
+  color: var(--subtext);
+  z-index: 800;
+  pointer-events: none;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+#statusbar span { color: var(--accent); font-weight: 600; }
+
+@media (max-width: 640px) {
+  #statusbar { bottom: 10px; font-size: 0.65rem; padding: 3px 10px; }
+}
+
+/* ── Loading ──────────────────────────────────────────────────────────────── */
+#loading {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 14px;
+  background: rgba(244,246,251,0.88);
+  z-index: 9999;
+  font-size: 0.88rem;
+  color: var(--subtext);
+  pointer-events: none;
+}
+[data-theme="dark"] #loading { background: rgba(15,17,23,0.88); }
+#loading.done { display: none; }
+
+.spinner {
+  width: 34px; height: 34px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }

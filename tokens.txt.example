@@ -1,0 +1,14 @@
+# Rename this file to tokens.txt and fill in your API keys.
+# Format: domain, key  (one per line, comma-separated)
+
+# AQICN — free key at https://aqicn.org/data-platform/token/
+aqicn.org, YOUR_AQICN_TOKEN
+
+# OpenAQ — free key at https://explore.openaq.org/register
+openaq.org, YOUR_OPENAQ_TOKEN
+
+# PurpleAir — free read key at https://develop.purpleair.com/
+purpleair.com, YOUR_PURPLEAIR_READ_KEY
+
+# Open-Meteo — no key needed
+open-meteo.com, NO API KEY NEEDED
