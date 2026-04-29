@@ -11,9 +11,12 @@ A real-time air quality map for Slovenia, aggregating data from five public and 
 ## Features
 
 - **Real-time data** refreshed every 15 minutes from five sources
-- **AQI colour-coded markers** (Good → Hazardous) with zoom-adaptive sizing
+- **EU EAQI colour-coded markers** (levels 1–6, Very Good → Extremely Poor) with zoom-adaptive sizing
+- **Marker clustering** — zoomed-out stations group into a single bubble coloured by the worst EAQI in the cluster; zoom in to see individual markers with their index value
 - **Interactive station cards** — tap any marker to see all readings; click a parameter to switch the 24-hour sparkline chart
 - **24-hour history** stored locally in SQLite, with a CAMS model fallback for PM2.5 when no local data exists yet
+- **EAQI calculated from rolling averages** — PM2.5 and PM10 colours use the 24-hour running mean from the DB; O₃, NO₂ and SO₂ use the latest hourly value, matching the official EU standard
+- **In-card EAQI reference table** — concentration breakpoints for all five pollutants shown below the chart, bilingual (SL/EN)
 - **Stale station handling** — stations that temporarily go offline are kept on the map with a dashed marker and a "last seen" timestamp for up to 7 days
 - **Dark / light theme** and **Slovenian / English** UI toggle, both persisted in localStorage
 - **Mobile-first layout** — full-screen map on desktop, bottom-sheet panel on mobile, iOS Safari tested
@@ -35,6 +38,7 @@ A real-time air quality map for Slovenia, aggregating data from five public and 
 | Backend | Python 3 / Flask |
 | Storage | SQLite (tall schema: `bucket × station × param`) |
 | Map | Leaflet.js + CartoDB tiles (light & dark) |
+| Clustering | Leaflet.markercluster |
 | Charts | Chart.js 4 |
 | Server | Nginx → Flask on any Ubuntu VPS |
 | TLS | Let's Encrypt via Certbot |
@@ -195,16 +199,20 @@ systemctl restart airq
 | `GET /api/history/<id>?param=PM2.5` | 24-hour 15-min buckets for any param |
 | `GET /api/status` | Collector timestamp and next-run countdown |
 
-## AQI Scale
+## EU Air Quality Index (EAQI)
 
-| Colour | AQI | PM2.5 (µg/m³) |
-|--------|-----|---------------|
-| 🟢 Good | 0–50 | 0–12 |
-| 🟡 Moderate | 51–100 | 12.1–35.4 |
-| 🟠 Unhealthy for Sensitive Groups | 101–150 | 35.5–55.4 |
-| 🔴 Unhealthy | 151–200 | 55.5–150.4 |
-| 🟣 Very Unhealthy | 201–300 | 150.5–250.4 |
-| 🟤 Hazardous | 301–500 | > 250.5 |
+Colours and index levels follow the [European Air Quality Index](https://www.eea.europa.eu/themes/air/air-quality-index) standard. PM2.5 and PM10 are evaluated on a **24-hour running mean**; O₃, NO₂ and SO₂ use the **latest hourly value**.
+
+| Level | Label | PM2.5 (µg/m³) | PM10 (µg/m³) | O₃ (µg/m³) | NO₂ (µg/m³) | SO₂ (µg/m³) |
+|-------|-------|--------------|-------------|-----------|------------|------------|
+| 1 🟢 | Very Good | 0–10 | 0–20 | 0–50 | 0–40 | 0–100 |
+| 2 🟩 | Good | 10–20 | 20–40 | 50–100 | 40–90 | 100–200 |
+| 3 🟡 | Medium | 20–25 | 40–50 | 100–130 | 90–120 | 200–350 |
+| 4 🟠 | Poor | 25–50 | 50–100 | 130–240 | 120–230 | 350–500 |
+| 5 🔴 | Very Poor | 50–75 | 100–150 | 240–380 | 230–340 | 500–750 |
+| 6 ⬛ | Extremely Poor | > 75 | > 150 | > 380 | > 340 | > 750 |
+
+The overall index for a station is the **worst level across all available pollutants**.
 
 ## License
 
