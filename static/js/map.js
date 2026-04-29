@@ -262,6 +262,12 @@ function openPanel(station) {
     readingsHtml = `<div class="p-reading" style="grid-column:1/-1">
       <div class="p-reading-label">${t("noData")}</div></div>`;
 
+  // Localize EAQI level label using the numeric level (1-6) → eaqiLevels array
+  const eaqiLevels = t("eaqiLevels");
+  const levelLabel = (station.aqi >= 1 && station.aqi <= 6)
+    ? eaqiLevels[station.aqi - 1]
+    : t("noData");
+
   const aqiSrc = station.aqi_source
     ? `<br><small style="font-size:0.65rem">${station.aqi_source}</small>` : "";
   const staleBanner = station.stale
@@ -274,7 +280,7 @@ function openPanel(station) {
     <div class="p-name">${station.name}</div>
     <div class="p-aqi-badge" style="background:${color}">
       <span class="p-aqi-value">${aqi}</span>
-      <span>${station.label || t("noData")}</span>
+      <span>${levelLabel}</span>
     </div>${aqiSrc}
     ${staleBanner}
     <div class="p-readings">${readingsHtml}</div>
