@@ -593,32 +593,85 @@ def _fetch_purpleair():
 
 AQICN_BOUNDS = "https://api.waqi.info/map/bounds/?latlng=45.42,13.38,46.87,16.61&token={t}"
 AQICN_FEED   = "https://api.waqi.info/feed/@{uid}/?token={t}"
-AQICN_LABELS = {
-    "pm25":("PM2.5 (AQI idx)","AQI"),"pm10":("PM10 (AQI idx)","AQI"),
-    "no2":("NO₂ (AQI idx)","AQI"),"o3":("O₃ (AQI idx)","AQI"),
-    "so2":("SO₂ (AQI idx)","AQI"),"co":("CO (AQI idx)","AQI"),
-    "t":("Temperature","°C"),"h":("Humidity","%"),"p":("Pressure","hPa"),
+
+# US EPA AQI sub-index → concentration reverse lookup tables
+# AQICN's iaqi values are US AQI sub-indices, NOT µg/m³ concentrations.
+# We reverse the EPA formula to get µg/m³ so EAQI breakpoints can be applied.
+_US_AQI_PM25 = [   # (aqi_lo, aqi_hi, conc_lo, conc_hi)  — µg/m³
+    (0,   50,  0.0,   12.0),
+    (51,  100, 12.1,  35.4),
+    (101, 150, 35.5,  55.4),
+    (151, 200, 55.5,  150.4),
+    (201, 300, 150.5, 250.4),
+    (301, 400, 250.5, 350.4),
+    (401, 500, 350.5, 500.4),
+]
+_US_AQI_PM10 = [   # µg/m³
+    (0,   50,  0,   54),
+    (51,  100, 55,  154),
+    (101, 150, 155, 254),
+    (151, 200, 255, 354),
+    (201, 300, 355, 424),
+    (301, 400, 425, 504),
+    (401, 500, 505, 604),
+]
+
+def _us_aqi_to_conc(aqi_val, bp_table):
+    """Reverse US EPA AQI sub-index → pollutant concentration (µg/m³)."""
+    if aqi_val is None:
+        return None
+    for a_lo, a_hi, c_lo, c_hi in bp_table:
+        if a_lo <= aqi_val <= a_hi:
+            return round(c_lo + (aqi_val - a_lo) / (a_hi - a_lo) * (c_hi - c_lo), 1)
+    return None
+
+# Gas readings are kept as AQI sub-index values (unit conversion ppb→µg/m³
+# requires temperature/pressure and is not worth the complexity for display).
+AQICN_GAS_LABELS = {
+    "no2": ("NO₂", "AQI idx"),
+    "o3":  ("O₃",  "AQI idx"),
+    "so2": ("SO₂", "AQI idx"),
+    "co":  ("CO",  "AQI idx"),
+    "t":   ("Temperature", "°C"),
+    "h":   ("Humidity",    "%"),
+    "p":   ("Pressure",    "hPa"),
 }
 
 def _fetch_one_aqicn(uid):
     try:
-        r=requests.get(AQICN_FEED.format(uid=uid,t=AQICN_TOKEN),timeout=10); r.raise_for_status()
-        d=r.json().get("data",{})
-        if not d or d=="Unknown station": return None
-        aqi=d.get("aqi")
-        try: aqi=int(aqi)
+        r = requests.get(AQICN_FEED.format(uid=uid, t=AQICN_TOKEN), timeout=10)
+        r.raise_for_status()
+        d = r.json().get("data", {})
+        if not d or d == "Unknown station": return None
+        aqi = d.get("aqi")
+        try: aqi = int(aqi)
         except: return None
-        geo=d.get("city",{}).get("geo",[None,None]); iaqi=d.get("iaqi",{})
-        readings=[]
-        for k,(lbl,unit) in AQICN_LABELS.items():
-            v=iaqi.get(k,{}).get("v")
-            if v is not None: readings.append({"type":lbl,"value":round(float(v),1),"unit":unit})
-        ci=aqi_to_color(aqi)
-        return {"uid":uid,"name":d.get("city",{}).get("name",str(uid)),
-                "lat":float(geo[0]) if geo[0] else None,
-                "lon":float(geo[1]) if geo[1] else None,
-                "aqi":aqi,"color":ci["color"],"label":ci["label"],
-                "dominant":d.get("dominentpol",""),"readings":readings}
+        geo  = d.get("city", {}).get("geo", [None, None])
+        iaqi = d.get("iaqi", {})
+        readings = []
+
+        # PM2.5 — reverse US AQI sub-index → µg/m³ so EAQI can be applied
+        pm25_conc = _us_aqi_to_conc(iaqi.get("pm25", {}).get("v"), _US_AQI_PM25)
+        if pm25_conc is not None:
+            readings.append({"type": "PM2.5", "value": pm25_conc, "unit": "µg/m³"})
+
+        # PM10 — same reverse conversion
+        pm10_conc = _us_aqi_to_conc(iaqi.get("pm10", {}).get("v"), _US_AQI_PM10)
+        if pm10_conc is not None:
+            readings.append({"type": "PM10", "value": pm10_conc, "unit": "µg/m³"})
+
+        # Gas pollutants + met — keep as AQI index values (displayed in card)
+        for k, (lbl, unit) in AQICN_GAS_LABELS.items():
+            v = iaqi.get(k, {}).get("v")
+            if v is not None:
+                readings.append({"type": lbl, "value": round(float(v), 1), "unit": unit})
+
+        ci = aqi_to_color(aqi)
+        return {"uid": uid, "name": d.get("city", {}).get("name", str(uid)),
+                "lat":  float(geo[0]) if geo[0] else None,
+                "lon":  float(geo[1]) if geo[1] else None,
+                "aqi": aqi, "color": ci["color"], "label": ci["label"],
+                "dominant": d.get("dominentpol", ""), "readings": readings}
     except Exception as e:
         print(f"[AQICN] {uid}: {e}"); return None
 
