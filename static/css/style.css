@@ -239,7 +239,7 @@ body {
   position: absolute;
   top: 0;
   right: 0;
-  width: 310px;
+  width: 420px;
   height: 100%;
   overflow-y: auto;
   background: var(--card);
