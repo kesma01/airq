@@ -171,6 +171,42 @@ body {
 }
 .leaflet-container { background: var(--bg); }
 
+/* ── Cluster markers ─────────────────────────────────────────────────────── */
+.cluster-marker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-weight: 700;
+  color: #111;
+  border: 2px solid var(--marker-border);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.30);
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+.cluster-marker:hover { transform: scale(1.15); }
+.cluster-aqi {
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+/* small station-count badge in the bottom-right corner */
+.cluster-count {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  background: var(--card);
+  color: var(--subtext);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.52rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 1px 3px;
+  pointer-events: none;
+}
+
 /* ── Markers ──────────────────────────────────────────────────────────────── */
 .aqi-marker {
   display: flex;

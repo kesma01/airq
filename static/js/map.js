@@ -88,9 +88,45 @@ let tileLayer = L.tileLayer(
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let allStations  = [];
-let markerLayer  = L.layerGroup().addTo(map);
 let activeChart  = null;
 let collectedAt  = null;
+
+// ── Cluster layer ─────────────────────────────────────────────────────────────
+let markerLayer = L.markerClusterGroup({
+  maxClusterRadius: 50,          // px — tighter clustering
+  showCoverageOnHover: false,    // skip the blue polygon
+  zoomToBoundsOnClick: true,
+  spiderfyOnMaxZoom: true,
+  iconCreateFunction(cluster) {
+    const children = cluster.getAllChildMarkers();
+
+    // Worst (highest) AQI determines the cluster colour
+    let worstAqi   = -1;
+    let worstColor = "#aaaaaa";
+    for (const m of children) {
+      const s = m._station;
+      if (s && s.aqi != null && s.aqi > worstAqi) {
+        worstAqi   = s.aqi;
+        worstColor = s.color;
+      }
+    }
+
+    const count  = children.length;
+    const label  = worstAqi >= 0 ? worstAqi : "?";
+    const size   = 36;
+    return L.divIcon({
+      className: "",
+      html: `<div class="cluster-marker" style="
+        width:${size}px;height:${size}px;
+        background:${worstColor};">
+        <span class="cluster-aqi">${label}</span>
+        <span class="cluster-count">${count}</span>
+      </div>`,
+      iconSize:   [size, size],
+      iconAnchor: [size / 2, size / 2],
+    });
+  },
+}).addTo(map);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function timeAgo(isoStr) {
@@ -126,11 +162,13 @@ function renderMarkers() {
   const zoom = map.getZoom();
   allStations.forEach(s => {
     const m = L.marker([s.lat, s.lon], { icon: makeIcon(s, zoom), title: s.name });
+    m._station = s;   // used by iconCreateFunction for cluster colour
     m.on("click", e => { L.DomEvent.stopPropagation(e); openPanel(s); });
     markerLayer.addLayer(m);
   });
 }
 
+// Redraw individual marker icons on zoom so AQI value appears when zoomed in.
 map.on("zoomend", renderMarkers);
 
 // Close panel when clicking on the map (outside panel)
