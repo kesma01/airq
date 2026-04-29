@@ -254,33 +254,112 @@ def _lookup(sid):
     with _registry_lock:
         return _registry.get(sid)
 
-# ── AQI helpers ───────────────────────────────────────────────────────────────
+# ── EU Air Quality Index (EAQI) ───────────────────────────────────────────────
+# Breakpoints (µg/m³) → level 1-6.  Upper bound is exclusive; level 6 = above all.
+# PM2.5 / PM10 use 24-hour running mean; gases use the latest hourly value.
 
-AQI_BP = [
-    (0,    12.0,  "Good",               "#00c400", 0,   50),
-    (12.1, 35.4,  "Moderate",           "#e8c300", 51,  100),
-    (35.5, 55.4,  "Unhealthy for Some", "#ff7e00", 101, 150),
-    (55.5, 150.4, "Unhealthy",          "#e00000", 151, 200),
-    (150.5,250.4, "Very Unhealthy",     "#8f3f97", 201, 300),
-    (250.5, 9999, "Hazardous",          "#7e0023", 301, 500),
-]
+EAQI_BP = {
+    "PM2.5": [(0, 10, 1), (10, 20, 2), (20, 25, 3), (25, 50, 4), (50, 75, 5)],
+    "PM10":  [(0, 20, 1), (20, 40, 2), (40, 50, 3), (50, 100, 4), (100, 150, 5)],
+    "O₃":   [(0, 50, 1), (50, 100, 2), (100, 130, 3), (130, 240, 4), (240, 380, 5)],
+    "NO₂":  [(0, 40, 1), (40, 90, 2), (90, 120, 3), (120, 230, 4), (230, 340, 5)],
+    "SO₂":  [(0, 100, 1), (100, 200, 2), (200, 350, 3), (350, 500, 4), (500, 750, 5)],
+}
+
+EAQI_META = {
+    1: ("#009966", "Very Good"),
+    2: ("#33CC33", "Good"),
+    3: ("#F0D800", "Medium"),
+    4: ("#FF9900", "Poor"),
+    5: ("#CC3300", "Very Poor"),
+    6: ("#820000", "Extremely Poor"),
+}
+
+def _eaqi_level(param, value):
+    """Return EAQI level 1-6 for a concentration value, or None if no data."""
+    if value is None or value < 0:
+        return None
+    for lo, hi, level in EAQI_BP.get(param, []):
+        if lo <= value < hi:
+            return level
+    return 6  # above all breakpoints
+
+def _eaqi_qi(level):
+    """Return {aqi, color, label} dict for an EAQI level (or None → no data)."""
+    if level is None:
+        return {"aqi": None, "color": "#aaaaaa", "label": "No data"}
+    color, label = EAQI_META.get(level, ("#820000", "Extremely Poor"))
+    return {"aqi": level, "color": color, "label": label}
 
 def pm25_to_aqi(pm25):
-    if pm25 is None or pm25 < 0:
-        return {"aqi": None, "color": "#aaaaaa", "label": "No data"}
-    for lo, hi, label, color, a_lo, a_hi in AQI_BP:
-        if lo <= pm25 <= hi:
-            return {"aqi": round(a_lo + (pm25-lo)/(hi-lo)*(a_hi-a_lo)),
-                    "color": color, "label": label}
-    return {"aqi": 500, "color": "#7e0023", "label": "Hazardous"}
+    """EAQI from a single PM2.5 reading (used during live collection before 24h history exists)."""
+    return _eaqi_qi(_eaqi_level("PM2.5", pm25))
 
-def aqi_to_color(aqi):
-    if aqi is None:
-        return {"color": "#aaaaaa", "label": "No data"}
-    for _, _, label, color, a_lo, a_hi in AQI_BP:
-        if a_lo <= aqi <= a_hi:
-            return {"color": color, "label": label}
-    return {"color": "#7e0023", "label": "Hazardous"}
+def aqi_to_color(raw_aqi):
+    """Approximate EAQI level from a US-scale AQI value (used for AQICN stations)."""
+    if raw_aqi is None:
+        return {"aqi": None, "color": "#aaaaaa", "label": "No data"}
+    if raw_aqi <= 33:  level = 1
+    elif raw_aqi <= 66:  level = 2
+    elif raw_aqi <= 100: level = 3
+    elif raw_aqi <= 150: level = 4
+    elif raw_aqi <= 200: level = 5
+    else:                level = 6
+    color, label = EAQI_META[level]
+    return {"aqi": level, "color": color, "label": label}
+
+def apply_eaqi(stations):
+    """
+    Recalculate EAQI for every station using proper averaging windows:
+      - PM2.5 and PM10 → 24-hour running mean from the DB
+      - O₃ / NO₂ / SO₂  → latest reading (hourly value)
+    Falls back to the current reading when the DB has no history yet.
+    Updates aqi / color / label in-place on each station dict.
+    """
+    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(hours=24)
+              ).strftime("%Y-%m-%dT%H:%M")
+
+    # Single query: 24h mean for PM2.5 and PM10 across all stations
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT station_id, param, AVG(value) AS avg_val "
+            "FROM measurements "
+            "WHERE param IN ('PM2.5','PM10') AND bucket >= ? "
+            "GROUP BY station_id, param",
+            (cutoff,)
+        ).fetchall()
+
+    pm_means = {}           # (station_id, param) → float
+    for r in rows:
+        pm_means[(r["station_id"], r["param"])] = r["avg_val"]
+
+    for s in stations:
+        sid      = s["id"]
+        readings = {r["type"]: r["value"] for r in s.get("readings", [])}
+        levels   = []
+
+        # PM2.5 — 24h mean, fall back to latest reading
+        pm25 = pm_means.get((sid, "PM2.5")) or readings.get("PM2.5")
+        lv = _eaqi_level("PM2.5", pm25)
+        if lv: levels.append(lv)
+
+        # PM10 — 24h mean, fall back to latest reading
+        pm10 = pm_means.get((sid, "PM10")) or readings.get("PM10")
+        lv = _eaqi_level("PM10", pm10)
+        if lv: levels.append(lv)
+
+        # Gases — latest hourly reading
+        for param in ("O₃", "NO₂", "SO₂"):
+            lv = _eaqi_level(param, readings.get(param))
+            if lv: levels.append(lv)
+
+        if not levels:
+            continue    # no concentration data — keep existing color (e.g. AQICN)
+
+        qi = _eaqi_qi(max(levels))
+        s["aqi"]   = qi["aqi"]
+        s["color"] = qi["color"]
+        s["label"] = qi["label"]
 
 def _sf(val):
     if val is None: return None
@@ -649,7 +728,10 @@ def _run_collection():
         s["stale"]     = False
         s["last_seen"] = None
 
-    # Persist latest metadata for every live station
+    store_measurements(live)        # persist to DB first so 24h means are current
+    apply_eaqi(live)               # recalculate colours using 24h rolling means
+
+    # Persist latest metadata for every live station (with updated EAQI colours)
     upsert_station_meta(live)
 
     # Merge in stations that were seen recently but missing from this collection
@@ -660,7 +742,6 @@ def _run_collection():
     ts     = datetime.datetime.utcnow()
     _set_snapshot(all_st, ts)
     _register(all_st)
-    store_measurements(live)   # only store measurements for fresh data
     print(f"[collector] done — {len(live)} live + {len(stale)} stale "
           f"= {len(all_st)} stations in {time.time()-t0:.1f}s")
 

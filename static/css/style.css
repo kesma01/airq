@@ -361,14 +361,73 @@ button.p-reading.active {
   margin-bottom: 6px;
 }
 .p-chart-wrap {
-  position: relative; height: 110px;
+  position: relative;
+  width: 100%;
+  height: 110px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 7px; padding: 6px;
+  border-radius: 7px;
+  padding: 6px;
+}
+.p-chart-wrap canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 .p-no-history {
   font-size: 0.76rem; color: var(--subtext); font-style: italic;
   padding: 8px 0;
+}
+
+/* ── EAQI reference table ────────────────────────────────────────────────── */
+.eaqi-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 4px;
+  border-radius: 6px;
+}
+.eaqi-table {
+  border-collapse: collapse;
+  font-size: 0.62rem;
+  width: 100%;
+  min-width: 360px;
+}
+.eaqi-table th, .eaqi-table td {
+  padding: 3px 5px;
+  text-align: center;
+  border: 1px solid rgba(255,255,255,0.15);
+  white-space: nowrap;
+}
+.eaqi-table thead th {
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 4px 5px;
+}
+.eaqi-table thead th:first-child { background: none; border: none; }
+.eaqi-num {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.eaqi-lbl {
+  display: block;
+  font-size: 0.55rem;
+  font-weight: 500;
+  opacity: 0.92;
+}
+.eaqi-poll {
+  text-align: left !important;
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+  font-weight: 600;
+  padding-right: 8px !important;
+}
+.eaqi-note {
+  font-size: 0.6rem;
+  color: var(--subtext);
+  font-style: italic;
+  margin-top: 2px;
 }
 
 /* ── Status bar ──────────────────────────────────────────────────────────── */

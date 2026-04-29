@@ -20,6 +20,12 @@ const LANG = {
     darkMode:     "🌙 Temno",
     lightMode:    "☀️ Svetlo",
     langToggle:   "EN",
+    eaqiTitle:    "EU Indeks kakovosti zraka (µg/m³)",
+    eaqiNote:     "PM₁₀ in PM₂.₅ temeljita na 24-urnem drsečem povprečju",
+    eaqiLevels:   ["Zelo dobro","Dobro","Srednje","Slabo","Zelo slabo","Izjemno slabo"],
+    eaqiPollutants: ["O₃","NO₂","SO₂","PM₁₀","PM₂.₅"],
+    legVeryGood: "Zelo dobro", legGood: "Dobro", legMedium: "Srednje",
+    legPoor: "Slabo", legVeryPoor: "Zelo slabo", legExtremelyPoor: "Izjemno slabo",
   },
   en: {
     title:        "Slovenia Air Quality",
@@ -39,8 +45,66 @@ const LANG = {
     darkMode:     "🌙 Dark",
     lightMode:    "☀️ Light",
     langToggle:   "SL",
+    eaqiTitle:    "EU Air Quality Index (µg/m³)",
+    eaqiNote:     "PM₁₀ and PM₂.₅ based on 24-hour running mean",
+    eaqiLevels:   ["Very Good","Good","Medium","Poor","Very Poor","Extremely Poor"],
+    eaqiPollutants: ["O₃","NO₂","SO₂","PM₁₀","PM₂.₅"],
+    legVeryGood: "Very Good", legGood: "Good", legMedium: "Medium",
+    legPoor: "Poor", legVeryPoor: "Very Poor", legExtremelyPoor: "Extremely Poor",
   },
 };
+
+// ── EU Air Quality Index reference table ──────────────────────────────────────
+const EAQI_LEVELS = [
+  { color: "#009966", textColor: "#fff" },
+  { color: "#33CC33", textColor: "#fff" },
+  { color: "#F0D800", textColor: "#333" },
+  { color: "#FF9900", textColor: "#fff" },
+  { color: "#CC3300", textColor: "#fff" },
+  { color: "#820000", textColor: "#fff" },
+];
+
+// Concentration ranges per pollutant per level [µg/m³]
+const EAQI_RANGES = [
+  ["0–50",  "50–100", "100–130", "130–240", "240–380", "380–800"],  // O₃
+  ["0–40",  "40–90",  "90–120",  "120–230", "230–340", "340–1000"], // NO₂
+  ["0–100", "100–200","200–350", "350–500", "500–750", "750–1250"], // SO₂
+  ["0–20",  "20–40",  "40–50",   "50–100",  "100–150", "150–1200"], // PM₁₀
+  ["0–10",  "10–20",  "20–25",   "25–50",   "50–75",   "75–800"],   // PM₂.₅
+];
+
+function buildEaqiTable() {
+  const levels     = t("eaqiLevels");
+  const pollutants = t("eaqiPollutants");
+
+  // Level header cells
+  const headerCells = EAQI_LEVELS.map((lv, i) => `
+    <th style="background:${lv.color};color:${lv.textColor}">
+      <span class="eaqi-num">${i + 1}</span>
+      <span class="eaqi-lbl">${levels[i]}</span>
+    </th>`).join("");
+
+  // Pollutant rows
+  const rows = EAQI_RANGES.map((ranges, pi) => {
+    const cells = ranges.map((val, li) => {
+      const lv = EAQI_LEVELS[li];
+      return `<td style="background:${lv.color};color:${lv.textColor}">${val}</td>`;
+    }).join("");
+    return `<tr><td class="eaqi-poll">${pollutants[pi]}</td>${cells}</tr>`;
+  }).join("");
+
+  return `
+    <div class="p-eaqi">
+      <div class="p-chart-title" style="margin-top:14px">${t("eaqiTitle")}</div>
+      <div class="eaqi-scroll">
+        <table class="eaqi-table">
+          <thead><tr><th></th>${headerCells}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="eaqi-note">${t("eaqiNote")}</div>
+    </div>`;
+}
 
 // ── Persisted preferences ─────────────────────────────────────────────────────
 let lang  = localStorage.getItem("airq_lang")  || "sl";
@@ -72,7 +136,7 @@ function applyLang() {
   document.getElementById("btn-theme").textContent =
     theme === "dark" ? t("lightMode") : t("darkMode");
   // Legend labels
-  const keys = ["good","moderate","unhealthyS","unhealthy","veryUnhealthy","hazardous","noData"];
+  const keys = ["legVeryGood","legGood","legMedium","legPoor","legVeryPoor","legExtremelyPoor","noData"];
   document.querySelectorAll(".leg").forEach((el, i) => {
     el.lastChild.textContent = " " + t(keys[i]);
   });
@@ -223,6 +287,7 @@ function openPanel(station) {
       <canvas id="sparkline"></canvas>
     </div>
     <div id="chart-status" class="p-no-history" style="display:none"></div>
+    ${buildEaqiTable()}
   `;
 
   // Wire reading buttons → chart
@@ -336,6 +401,8 @@ async function loadHistory(station, param, unit) {
     },
     options: {
       animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
         tooltip: {
