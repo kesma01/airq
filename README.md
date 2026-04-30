@@ -30,6 +30,7 @@ A real-time air quality map for Slovenia, aggregating data from five public and 
 | [OpenSenseMap](https://opensensemap.org/) | Citizen science sensor network | None |
 | [PurpleAir](https://www.purpleair.com/) | Dual-channel Plantower sensors, Slovenia bbox | API key |
 | [AQICN](https://aqicn.org/) | Multi-pollutant AQI including cross-border AT/HR stations | API key |
+| [OpenAQ](https://openaq.org/) | Additional Slovenian low-cost sensors (PM2.5, PM1, NO₂, O₃, temperature, humidity) not covered by other sources; deduplicated by proximity | API key |
 
 ## Tech Stack
 
