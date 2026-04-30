@@ -115,15 +115,29 @@ body {
   #header {
     padding: 6px 12px;
   }
+  /* Stack title + subtitle vertically so the full title always fits */
   #header-left {
     flex: 1;
     min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
   }
   #title {
-    font-size: 0.88rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  /* Show sources below the title on mobile */
+  #subtitle {
+    display: block;
+    font-size: 0.55rem;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
   }
   #legend {
     order: 10;          /* after header-right */
@@ -135,6 +149,10 @@ body {
     -webkit-overflow-scrolling: touch;
   }
   .leg { font-size: 0.65rem; }
+  /* Tighten header-right so more space is left for the title */
+  #header-right { gap: 4px; }
+  .icon-btn { padding: 3px 6px; font-size: 0.68rem; }
+  .icon-link { padding: 3px 5px; }
 }
 
 /* ── Icon buttons (theme / lang) ────────────────────────────────────────── */
