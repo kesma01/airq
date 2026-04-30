@@ -153,6 +153,16 @@ body {
 }
 .icon-btn:hover { background: var(--border); color: var(--text); }
 
+/* Icon-only links (GitHub, Bluesky) */
+.icon-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  text-decoration: none;
+  line-height: 1;
+}
+
 /* ── Map ──────────────────────────────────────────────────────────────────── */
 /* map-wrap is the flex child that grows; map fills it; overlays sit beside map
    so they are NOT inside leaflet-container (which has overflow:hidden).
