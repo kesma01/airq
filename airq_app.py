@@ -43,6 +43,7 @@ def _load_tokens():
 _T = _load_tokens()
 AQICN_TOKEN   = _T.get("aqicn.org", "")
 PURPLEAIR_KEY = _T.get("purpleair.com", "")
+OPENAQ_KEY    = _T.get("openaq.org", "")
 
 # ── SQLite DB ─────────────────────────────────────────────────────────────────
 
@@ -762,6 +763,158 @@ def _apply_aqicn(primary):
 
     return new_stations
 
+# ── OpenAQ ────────────────────────────────────────────────────────────────────
+# OpenAQ v3 API — adds Slovenian stations not already covered by ARSO.
+# Deduplication against primary sources is done by proximity (0.05°).
+
+OPENAQ_BBOX_URL   = ("https://api.openaq.org/v3/locations"
+                     "?bbox=13.38,45.42,16.61,46.87&limit=200")
+OPENAQ_LATEST_URL = "https://api.openaq.org/v3/locations/{id}/latest"
+
+# OpenAQ parameter names → internal label + unit
+OPENAQ_PARAM_MAP = {
+    "pm25":             ("PM2.5",       "µg/m³"),
+    "pm10":             ("PM10",        "µg/m³"),
+    "pm1":              ("PM1",         "µg/m³"),
+    "no2":              ("NO₂",         "µg/m³"),
+    "o3":               ("O₃",          "µg/m³"),
+    "so2":              ("SO₂",         "µg/m³"),
+    "co":               ("CO",          "µg/m³"),
+    "no":               ("NO",          "µg/m³"),
+    "relativehumidity": ("Humidity",    "%"),
+    "temperature":      ("Temperature", "°C"),
+}
+OPENAQ_SKIP_PARAMS = {"um003"}   # particle count — not a mass concentration
+
+def _fetch_one_openaq(loc, sensor_map):
+    """Fetch and parse the latest measurements for one OpenAQ location."""
+    lid = loc["id"]
+    try:
+        r = requests.get(
+            OPENAQ_LATEST_URL.format(id=lid),
+            headers={"X-API-Key": OPENAQ_KEY},
+            timeout=10,
+        )
+        r.raise_for_status()
+        results = r.json().get("results", [])
+    except Exception as e:
+        print(f"[OpenAQ] {lid}: {e}")
+        return None
+
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    readings = []
+    pm25 = pm10 = None
+
+    for entry in results:
+        val = entry.get("value")
+        if val is None:
+            continue
+        # Skip measurements older than 3 hours (hourly-reporting stations)
+        ts_str = (entry.get("datetime") or {}).get("utc", "")
+        try:
+            ts  = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            age = (now_utc - ts).total_seconds()
+            if age > 10800:
+                continue
+        except Exception:
+            pass
+
+        param_raw = sensor_map.get(entry["sensorsId"])
+        if not param_raw or param_raw in OPENAQ_SKIP_PARAMS:
+            continue
+        if param_raw not in OPENAQ_PARAM_MAP:
+            continue
+
+        label, unit = OPENAQ_PARAM_MAP[param_raw]
+        readings.append({"type": label, "value": round(float(val), 2), "unit": unit})
+        if param_raw == "pm25":
+            pm25 = float(val)
+        elif param_raw == "pm10":
+            pm10 = float(val)
+
+    if not readings:
+        return None
+
+    coords = loc["coordinates"]
+    qi = pm25_to_aqi(pm25)
+    instruments = {i["name"] for i in loc.get("instruments", [])} - {""}
+    provider    = loc.get("provider", {}).get("name", "Unknown")
+    return {
+        "id":          f"oaq_{lid}",
+        "source":      "OpenAQ",
+        "name":        loc["name"],
+        "lat":         coords["latitude"],
+        "lon":         coords["longitude"],
+        "pm25": pm25, "pm10": pm10,
+        "aqi":   qi["aqi"], "color": qi["color"], "label": qi["label"],
+        "sensor_type": ", ".join(sorted(instruments)) if instruments else "Sensor",
+        "vendor":      f"OpenAQ · {provider}",
+        "readings":    readings,
+    }
+
+def _fetch_openaq(primary):
+    """
+    Fetch active Slovenian stations from OpenAQ that are not already in the
+    primary set (ARSO / Sensor.Community / OpenSenseMap / PurpleAir).
+    Only SI-country stations last-seen within 48 h are considered.
+    """
+    if not OPENAQ_KEY:
+        return []
+    try:
+        r = requests.get(
+            OPENAQ_BBOX_URL,
+            headers={"X-API-Key": OPENAQ_KEY},
+            timeout=15,
+        )
+        r.raise_for_status()
+        locations = r.json().get("results", [])
+    except Exception as e:
+        print(f"[OpenAQ] bbox: {e}")
+        return []
+
+    cutoff = (datetime.datetime.now(datetime.timezone.utc)
+              - datetime.timedelta(hours=48))
+
+    # Filter to active SI stations and build per-location sensor maps
+    candidates = []
+    for loc in locations:
+        if loc.get("country", {}).get("code") != "SI":
+            continue
+        ts_str = (loc.get("datetimeLast") or {}).get("utc", "")
+        try:
+            ts = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            if ts < cutoff:
+                continue
+        except Exception:
+            continue
+        sensor_map = {s["id"]: s["parameter"]["name"]
+                      for s in loc.get("sensors", [])}
+        candidates.append((loc, sensor_map))
+
+    # Drop any location close to an already-known primary station
+    new_locs = []
+    for loc, sm in candidates:
+        c = loc["coordinates"]
+        fake = {"lat": c["latitude"], "lon": c["longitude"]}
+        if not any(_near(st, fake, 0.05) for st in primary):
+            new_locs.append((loc, sm))
+
+    if not new_locs:
+        return []
+
+    print(f"[OpenAQ] fetching latest for {len(new_locs)} new locations…")
+    out = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = {ex.submit(_fetch_one_openaq, loc, sm): loc
+                   for loc, sm in new_locs}
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result:
+                out.append(result)
+
+    print(f"[OpenAQ] {len(out)} new stations")
+    return out
+
 # ── Collector ─────────────────────────────────────────────────────────────────
 
 def _run_collection():
@@ -774,7 +927,8 @@ def _run_collection():
         arso=fa.result(); sc=fsc.result(); osm=fosm.result(); pa=fpa.result()
     primary = arso + sc + osm + pa
     aqicn   = _apply_aqicn(primary)
-    live    = primary + aqicn
+    openaq  = _fetch_openaq(primary)
+    live    = primary + aqicn + openaq
 
     # Mark all live stations as fresh
     for s in live:
