@@ -4,7 +4,7 @@ A real-time air quality map for Slovenia, aggregating data from five public and 
 
 **Live at → [airq.kesma.wtf](https://airq.kesma.wtf)**
 
-![Slovenia Air Quality Map](https://airq.kesma.wtf/static/preview.png)
+![Slovenia Air Quality Map](https://airq.kesma.wtf/static/preview.jpg)
 
 ---
 
