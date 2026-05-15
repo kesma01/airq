@@ -964,6 +964,45 @@ def _collector_loop():
         time.sleep(wait)
         _run_collection()
 
+# ── CAMS model grid ───────────────────────────────────────────────────────────
+# Slovenia bbox: lat 45.25–46.75, lon 13.25–16.75, 0.25° grid → 7×15 = 105 pts
+_CAMS_LATS = [round(45.25 + i * 0.25, 2) for i in range(7)]
+_CAMS_LONS = [round(13.25 + i * 0.25, 2) for i in range(15)]
+_cams_grid_cache: dict = {"data": None, "ts": 0.0}
+_cams_grid_lock = threading.Lock()
+CAMS_GRID_TTL = 3600  # refresh once per hour
+
+def _fetch_cams_point(lat, lon):
+    url = (
+        "https://air-quality-api.open-meteo.com/v1/air-quality"
+        f"?latitude={lat}&longitude={lon}"
+        "&hourly=pm2_5,pm10,nitrogen_dioxide,ozone"
+        "&forecast_days=1&past_days=0&timezone=UTC"
+    )
+    try:
+        r = requests.get(url, timeout=10)
+        d = r.json()
+        times = d["hourly"]["time"]
+        now_h = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:00")
+        idx = next((i for i, t in enumerate(times) if t >= now_h), len(times) - 1)
+        vals = {
+            "PM2.5": (d["hourly"].get("pm2_5")     or [None] * len(times))[idx],
+            "PM10":  (d["hourly"].get("pm10")       or [None] * len(times))[idx],
+            "NO₂":   (d["hourly"].get("nitrogen_dioxide") or [None] * len(times))[idx],
+            "O₃":    (d["hourly"].get("ozone")      or [None] * len(times))[idx],
+        }
+        levels = [lv for lv in (_eaqi_level(p, v) for p, v in vals.items()) if lv]
+        level  = max(levels) if levels else None
+        qi     = _eaqi_qi(level)
+        return {
+            "lat": lat, "lon": lon,
+            "level": level, "color": qi["color"],
+            "pm25": vals["PM2.5"], "pm10": vals["PM10"],
+            "no2":  vals["NO₂"],  "o3":   vals["O₃"],
+        }
+    except Exception as e:
+        return {"lat": lat, "lon": lon, "level": None, "color": "#aaaaaa"}
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -983,6 +1022,29 @@ def stations():
         "collected_at": ts.strftime("%Y-%m-%dT%H:%M:%SZ") if ts else None,
         "total":       snap["total"],
     })
+
+@app.route("/api/cams")
+def cams_grid():
+    with _cams_grid_lock:
+        if _cams_grid_cache["data"] and time.time() - _cams_grid_cache["ts"] < CAMS_GRID_TTL:
+            return jsonify(_cams_grid_cache["data"])
+
+    coords = [(lat, lon) for lat in _CAMS_LATS for lon in _CAMS_LONS]
+    points = []
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        futs = {ex.submit(_fetch_cams_point, lat, lon): (lat, lon) for lat, lon in coords}
+        for f in as_completed(futs):
+            points.append(f.result())
+
+    result = {
+        "points":     points,
+        "cell_deg":   0.25,
+        "fetched_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    with _cams_grid_lock:
+        _cams_grid_cache["data"] = result
+        _cams_grid_cache["ts"]   = time.time()
+    return jsonify(result)
 
 @app.route("/api/history/<station_id>")
 def history(station_id):
