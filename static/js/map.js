@@ -26,9 +26,6 @@ const LANG = {
     eaqiPollutants: ["O₃","NO₂","SO₂","PM₁₀","PM₂.₅"],
     legVeryGood: "Zelo dobro", legGood: "Dobro", legMedium: "Srednje",
     legPoor: "Slabo", legVeryPoor: "Zelo slabo", legExtremelyPoor: "Izjemno slabo",
-    camsBtn:      "🌫️ Model",
-    camsLoading:  "Nalaganje modela…",
-    camsLabel:    "CAMS model · trenutna ura",
   },
   en: {
     title:        "Slovenia Air Quality",
@@ -54,9 +51,6 @@ const LANG = {
     eaqiPollutants: ["O₃","NO₂","SO₂","PM₁₀","PM₂.₅"],
     legVeryGood: "Very Good", legGood: "Good", legMedium: "Medium",
     legPoor: "Poor", legVeryPoor: "Very Poor", legExtremelyPoor: "Extremely Poor",
-    camsBtn:      "🌫️ Model",
-    camsLoading:  "Loading model…",
-    camsLabel:    "CAMS model · current hour",
   },
 };
 
@@ -160,9 +154,6 @@ let tileLayer = L.tileLayer(
 let allStations  = [];
 let activeChart  = null;
 let collectedAt  = null;
-let camsLayer    = null;   // custom canvas L.Layer
-let camsVisible  = false;
-let sloveniaGeoJSON = null; // cached boundary
 
 // ── Cluster layer ─────────────────────────────────────────────────────────────
 let markerLayer = L.markerClusterGroup({
@@ -493,137 +484,6 @@ function toggleLang() {
   localStorage.setItem("airq_lang", lang);
   applyLang();
   updateStatusBar();
-}
-
-// ── CAMS model layer ──────────────────────────────────────────────────────────
-
-// Custom canvas layer that clips CAMS grid cells to Slovenia's boundary
-const CAMSLayer = L.Layer.extend({
-  initialize(data) { this._data = data; },
-
-  onAdd(map) {
-    this._map = map;
-    this._canvas = document.createElement("canvas");
-    Object.assign(this._canvas.style, {
-      position: "absolute", top: "0", left: "0",
-      pointerEvents: "none",
-    });
-    // Insert below markers but above tiles (overlayPane z-index ~400)
-    map.getPane("overlayPane").appendChild(this._canvas);
-    map.on("moveend zoomend resize", this._draw, this);
-    this._draw();
-  },
-
-  onRemove(map) {
-    this._canvas.remove();
-    map.off("moveend zoomend resize", this._draw, this);
-  },
-
-  _draw() {
-    const map    = this._map;
-    const size   = map.getSize();
-    const canvas = this._canvas;
-    canvas.width  = size.x;
-    canvas.height = size.y;
-    canvas.style.width  = size.x + "px";
-    canvas.style.height = size.y + "px";
-
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, size.x, size.y);
-
-    // ── Clip to Slovenia polygon ──────────────────────────────────────────
-    if (sloveniaGeoJSON) {
-      const geom = sloveniaGeoJSON.features[0].geometry;
-      const rings = geom.type === "MultiPolygon"
-        ? geom.coordinates.flat(1)
-        : geom.coordinates;
-      ctx.beginPath();
-      for (const ring of rings) {
-        ring.forEach(([lng, lat], i) => {
-          const p = map.latLngToContainerPoint([lat, lng]);
-          i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
-        });
-        ctx.closePath();
-      }
-      ctx.clip();
-    }
-
-    // ── Draw grid cells ───────────────────────────────────────────────────
-    const half = this._data.cell_deg / 2;
-    ctx.globalAlpha = 0.55;
-    for (const pt of this._data.points) {
-      const sw = map.latLngToContainerPoint([pt.lat - half, pt.lon - half]);
-      const ne = map.latLngToContainerPoint([pt.lat + half, pt.lon + half]);
-      ctx.fillStyle = (pt.level !== null && pt.color) ? pt.color : "#cccccc";
-      ctx.fillRect(ne.x, ne.y, sw.x - ne.x, sw.y - ne.y);
-    }
-    ctx.globalAlpha = 1;
-
-    // ── Slovenia border outline ───────────────────────────────────────────
-    if (sloveniaGeoJSON) {
-      const geom = sloveniaGeoJSON.features[0].geometry;
-      const rings = geom.type === "MultiPolygon"
-        ? geom.coordinates.flat(1)
-        : geom.coordinates;
-      ctx.beginPath();
-      for (const ring of rings) {
-        ring.forEach(([lng, lat], i) => {
-          const p = map.latLngToContainerPoint([lat, lng]);
-          i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
-        });
-        ctx.closePath();
-      }
-      ctx.strokeStyle = "rgba(0,0,0,0.5)";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-  },
-});
-
-async function toggleCams() {
-  const btn = document.getElementById("btn-cams");
-  if (camsVisible) {
-    if (camsLayer) { camsLayer.remove(); camsLayer = null; }
-    camsVisible = false;
-    btn.classList.remove("active");
-    // Remove legend note
-    const note = document.getElementById("cams-note");
-    if (note) note.remove();
-    return;
-  }
-
-  // Show loading state
-  btn.disabled = true;
-  btn.textContent = t("camsLoading");
-
-  try {
-    // Load Slovenia boundary if not yet cached
-    if (!sloveniaGeoJSON) {
-      const r = await fetch("/static/slovenia.geojson");
-      sloveniaGeoJSON = await r.json();
-    }
-    // Fetch CAMS grid
-    const r    = await fetch("/api/cams");
-    const data = await r.json();
-
-    camsLayer   = new CAMSLayer(data).addTo(map);
-    camsVisible = true;
-    btn.classList.add("active");
-
-    // Small note below statusbar
-    let note = document.getElementById("cams-note");
-    if (!note) {
-      note = document.createElement("div");
-      note.id = "cams-note";
-      document.getElementById("map-wrap").appendChild(note);
-    }
-    note.textContent = t("camsLabel");
-  } catch (e) {
-    console.error("CAMS load failed", e);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = t("camsBtn");
-  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

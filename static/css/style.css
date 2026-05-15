@@ -169,31 +169,7 @@ body {
   white-space: nowrap;
   flex-shrink: 0;
 }
-.icon-btn:hover  { background: var(--border); color: var(--text); }
-.icon-btn.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.icon-btn.active:hover { background: var(--accent); color: #fff; filter: brightness(1.1); }
-
-/* CAMS model note (below status bar) */
-#cams-note {
-  position: absolute;
-  bottom: 52px; left: 50%;
-  transform: translateX(-50%);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 3px 12px;
-  font-size: 0.64rem;
-  color: var(--subtext);
-  z-index: 800;
-  pointer-events: none;
-  box-shadow: var(--shadow);
-  white-space: nowrap;
-}
-@media (max-width: 640px) { #cams-note { bottom: 38px; font-size: 0.6rem; } }
+.icon-btn:hover { background: var(--border); color: var(--text); }
 
 /* Icon-only links (GitHub, Bluesky) */
 .icon-link {
