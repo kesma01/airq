@@ -10,13 +10,14 @@ A real-time air quality map for Slovenia, aggregating data from five public and 
 
 ## Features
 
-- **Real-time data** refreshed every 15 minutes from five sources
+- **Real-time data** refreshed every 15 minutes from six sources
 - **EU EAQI colour-coded markers** (levels 1–6, Very Good → Extremely Poor) with zoom-adaptive sizing
 - **Marker clustering** — zoomed-out stations group into a single bubble coloured by the worst EAQI in the cluster; zoom in to see individual markers with their index value
 - **Interactive station cards** — tap any marker to see all readings; click a parameter to switch the 24-hour sparkline chart
 - **24-hour history** stored locally in SQLite, with a CAMS model fallback for PM2.5 when no local data exists yet
 - **EAQI calculated from rolling averages** — PM2.5 and PM10 colours use the 24-hour running mean from the DB; O₃, NO₂ and SO₂ use the latest hourly value, matching the official EU standard
 - **In-card EAQI reference table** — concentration breakpoints for all five pollutants shown below the chart, bilingual (SL/EN)
+- **CAMS model overlay** — toggle a colour-coded grid over Slovenia (0.25° cells, 1-hour cache) sourced from Open-Meteo/ECMWF; tap any cell to open a full panel with 24-hour charts for all five pollutants and a proper EAQI badge
 - **Stale station handling** — stations that temporarily go offline are kept on the map with a dashed marker and a "last seen" timestamp for up to 7 days
 - **Dark / light theme** and **Slovenian / English** UI toggle, both persisted in localStorage
 - **Mobile-first layout** — full-screen map on desktop, bottom-sheet panel on mobile, iOS Safari tested
@@ -41,6 +42,7 @@ A real-time air quality map for Slovenia, aggregating data from five public and 
 | Map | Leaflet.js + CartoDB tiles (light & dark) |
 | Clustering | Leaflet.markercluster |
 | Charts | Chart.js 4 |
+| CAMS model | Open-Meteo CAMS API (ECMWF) — free, no key required |
 | Server | Nginx → Flask on any Ubuntu VPS |
 | TLS | Let's Encrypt via Certbot |
 
@@ -198,6 +200,8 @@ systemctl restart airq
 |----------|-------------|
 | `GET /api/stations` | All stations with current AQI, readings, stale flag |
 | `GET /api/history/<id>?param=PM2.5` | 24-hour 15-min buckets for any param |
+| `GET /api/cams` | 0.25° CAMS grid over Slovenia (105 points, 1-hour cache) |
+| `GET /api/cams/history?lat=&lon=` | 24-hour hourly CAMS data for one grid point — all 5 EAQI params |
 | `GET /api/status` | Collector timestamp and next-run countdown |
 
 ## EU Air Quality Index (EAQI)

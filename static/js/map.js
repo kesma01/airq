@@ -26,6 +26,12 @@ const LANG = {
     eaqiPollutants: ["O₃","NO₂","SO₂","PM₁₀","PM₂.₅"],
     legVeryGood: "Zelo dobro", legGood: "Dobro", legMedium: "Srednje",
     legPoor: "Slabo", legVeryPoor: "Zelo slabo", legExtremelyPoor: "Izjemno slabo",
+    camsBtn:      "🌫️ Model",
+    camsLoading:  "Nalaganje modela…",
+    camsLabel:    "CAMS model · trenutna ura",
+    camsSource:   "CAMS Model",
+    camsVendor:   "Open-Meteo · ECMWF",
+    camsNoData:   "Za to lokacijo ni podatkov CAMS modela.",
   },
   en: {
     title:        "Slovenia Air Quality",
@@ -51,6 +57,12 @@ const LANG = {
     eaqiPollutants: ["O₃","NO₂","SO₂","PM₁₀","PM₂.₅"],
     legVeryGood: "Very Good", legGood: "Good", legMedium: "Medium",
     legPoor: "Poor", legVeryPoor: "Very Poor", legExtremelyPoor: "Extremely Poor",
+    camsBtn:      "🌫️ Model",
+    camsLoading:  "Loading model…",
+    camsLabel:    "CAMS model · current hour",
+    camsSource:   "CAMS Model",
+    camsVendor:   "Open-Meteo · ECMWF",
+    camsNoData:   "No CAMS model data for this location.",
   },
 };
 
@@ -72,6 +84,17 @@ const EAQI_RANGES = [
   ["0–20",  "20–40",  "40–50",   "50–100",  "100–150", "150–1200"], // PM₁₀
   ["0–10",  "10–20",  "20–25",   "25–50",   "50–75",   "75–800"],   // PM₂.₅
 ];
+
+// Open-Meteo param key → our label
+const CAMS_PARAM_MAP = {
+  "pm2_5":            "PM2.5",
+  "pm10":             "PM10",
+  "nitrogen_dioxide": "NO₂",
+  "ozone":            "O₃",
+  "sulphur_dioxide":  "SO₂",
+};
+const CAMS_PARAMS = ["PM2.5","PM10","O₃","NO₂","SO₂"];
+
 
 function buildEaqiTable() {
   const levels     = t("eaqiLevels");
@@ -154,6 +177,10 @@ let tileLayer = L.tileLayer(
 let allStations  = [];
 let activeChart  = null;
 let collectedAt  = null;
+let camsLayer        = null;   // custom canvas L.Layer
+let camsVisible      = false;
+let sloveniaGeoJSON  = null;   // cached boundary
+let camsClickHandler = null;   // map click handler while CAMS is active
 
 // ── Cluster layer ─────────────────────────────────────────────────────────────
 let markerLayer = L.markerClusterGroup({
@@ -344,23 +371,30 @@ async function loadHistory(station, param, unit) {
   let isModel = false;
 
   try {
-    const res  = await fetch(`/api/history/${encodeURIComponent(station.id)}?param=${encodeURIComponent(param)}`);
-    const data = await res.json();
-
-    if (data.has_data) {
-      points = data.points;
-    } else if (param === "PM2.5") {
-      // CAMS model fallback only for PM2.5 (the only param Open-Meteo exposes)
-      isModel = true;
-      const r = await fetch(
-        `https://air-quality-api.open-meteo.com/v1/air-quality` +
-        `?latitude=${station.lat}&longitude=${station.lon}` +
-        `&hourly=pm2_5&past_days=1&forecast_days=0&timezone=Europe%2FZagreb`
-      );
-      const d = await r.json();
-      const times = d.hourly?.time || [];
-      const pm25  = d.hourly?.pm2_5 || [];
-      points = times.map((ts, i) => ({ t: ts + ":00Z", v: pm25[i] ?? null }));
+    if (station.source === "CAMS") {
+      // Fetch from CAMS history endpoint — returns all 5 params in one call
+      const res  = await fetch(`/api/cams/history?lat=${station.lat}&lon=${station.lon}`);
+      const data = await res.json();
+      const series = (data.series || []).find(s => s.type === param);
+      points = series ? series.points : [];
+    } else {
+      const res  = await fetch(`/api/history/${encodeURIComponent(station.id)}?param=${encodeURIComponent(param)}`);
+      const data = await res.json();
+      if (data.has_data) {
+        points = data.points;
+      } else if (param === "PM2.5") {
+        // CAMS model fallback for stations with no DB history yet
+        isModel = true;
+        const r = await fetch(
+          `https://air-quality-api.open-meteo.com/v1/air-quality` +
+          `?latitude=${station.lat}&longitude=${station.lon}` +
+          `&hourly=pm2_5&past_days=1&forecast_days=0&timezone=Europe%2FZagreb`
+        );
+        const d = await r.json();
+        const times = d.hourly?.time || [];
+        const pm25  = d.hourly?.pm2_5 || [];
+        points = times.map((ts, i) => ({ t: ts + ":00Z", v: pm25[i] ?? null }));
+      }
     }
   } catch (e) {
     console.error("History fetch failed", e);
@@ -484,6 +518,241 @@ function toggleLang() {
   localStorage.setItem("airq_lang", lang);
   applyLang();
   updateStatusBar();
+}
+
+// ── CAMS model layer ──────────────────────────────────────────────────────────
+
+// Custom canvas layer that clips CAMS grid cells to Slovenia's boundary
+const CAMSLayer = L.Layer.extend({
+  initialize(data) { this._data = data; },
+
+  onAdd(map) {
+    this._map = map;
+    this._canvas = document.createElement("canvas");
+    Object.assign(this._canvas.style, { position: "absolute", pointerEvents: "none" });
+    map.getPane("overlayPane").appendChild(this._canvas);
+    map.on("move zoomend resize viewreset", this._draw, this);
+    this._draw();
+  },
+
+  onRemove(map) {
+    this._canvas.remove();
+    map.off("move zoomend resize viewreset", this._draw, this);
+  },
+
+  _draw() {
+    const map    = this._map;
+    const size   = map.getSize();
+    const canvas = this._canvas;
+
+    // Canvas anchored at viewport (0,0) by counteracting the mapPane transform.
+    // Drawing must therefore use containerPoint (= viewport pixel coords).
+    // setPosition(topLeft) sets canvas.transform = translate(-mapPanePos)
+    // which, composited with mapPane.transform = translate(+mapPanePos), nets (0,0).
+    const topLeft = map.containerPointToLayerPoint([0, 0]);
+    L.DomUtil.setPosition(canvas, topLeft);
+
+    canvas.width  = size.x;
+    canvas.height = size.y;
+
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, size.x, size.y);
+
+    // helper: lat/lng → viewport pixel (matches the canvas anchor at viewport 0,0)
+    const cp = (lat, lng) => map.latLngToContainerPoint([lat, lng]);
+
+    // ── Clip to Slovenia polygon ──────────────────────────────────────────
+    if (sloveniaGeoJSON) {
+      const geom  = sloveniaGeoJSON.features[0].geometry;
+      const rings = geom.type === "MultiPolygon" ? geom.coordinates.flat(1) : geom.coordinates;
+      ctx.beginPath();
+      for (const ring of rings) {
+        ring.forEach(([lng, lat], i) => {
+          const p = cp(lat, lng);
+          i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+      }
+      ctx.clip();
+    }
+
+    // ── Draw grid cells ───────────────────────────────────────────────────
+    const half = this._data.cell_deg / 2;
+    ctx.globalAlpha = 0.55;
+    for (const pt of this._data.points) {
+      const sw = cp(pt.lat - half, pt.lon - half);
+      const ne = cp(pt.lat + half, pt.lon + half);
+      ctx.fillStyle = (pt.level !== null && pt.color) ? pt.color : "#cccccc";
+      ctx.fillRect(ne.x, ne.y, sw.x - ne.x, sw.y - ne.y);
+    }
+    ctx.globalAlpha = 1;
+
+    // ── Slovenia border outline ───────────────────────────────────────────
+    if (sloveniaGeoJSON) {
+      const geom  = sloveniaGeoJSON.features[0].geometry;
+      const rings = geom.type === "MultiPolygon" ? geom.coordinates.flat(1) : geom.coordinates;
+      ctx.beginPath();
+      for (const ring of rings) {
+        ring.forEach(([lng, lat], i) => {
+          const p = cp(lat, lng);
+          i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+      }
+      ctx.strokeStyle = "rgba(0,0,0,0.5)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  },
+});
+
+// ── CAMS pixel panel ──────────────────────────────────────────────────────────
+async function openCamsPanel(cell) {
+  // Show loading state in panel immediately
+  const panel   = document.getElementById("panel");
+  const content = document.getElementById("panel-content");
+  panel.classList.remove("hidden");
+  content.innerHTML = `<div style="padding:20px;color:var(--subtext);font-size:0.8rem">${t("camsLoading")}</div>`;
+  if (activeChart) { activeChart.destroy(); activeChart = null; }
+
+  // Fetch 24h history + proper EAQI from backend
+  let histData = null;
+  try {
+    const r = await fetch(`/api/cams/history?lat=${cell.lat}&lon=${cell.lon}`);
+    histData = await r.json();
+  } catch(e) {
+    console.error("CAMS history fetch failed", e);
+  }
+
+  // EAQI from history (24h mean for PM, latest for gases)
+  const eaqi   = histData?.eaqi  || { level: cell.level, color: cell.color, label: "" };
+  const level  = eaqi.level;
+  const color  = eaqi.color || "#aaaaaa";
+  const eaqiLevels = t("eaqiLevels");
+  const levelLabel = (level >= 1 && level <= 6) ? eaqiLevels[level - 1] : t("noData");
+
+  // Build readings from history vals (24h mean for PM, latest for gases)
+  const vals = histData?.vals || {};
+  const UNITS = { "PM2.5":"µg/m³","PM10":"µg/m³","O₃":"µg/m³","NO₂":"µg/m³","SO₂":"µg/m³" };
+  let readingsHtml = "";
+  CAMS_PARAMS.forEach(p => {
+    const v = vals[p];
+    const display = (v !== null && v !== undefined) ? (+v).toFixed(1) : "–";
+    const unit    = UNITS[p] || "";
+    readingsHtml += `
+      <button class="p-reading" data-param="${p}" data-unit="${unit}">
+        <div class="p-reading-label">${p}</div>
+        <div class="p-reading-value">${display} <small style="font-size:0.6rem;color:var(--subtext)">${unit}</small></div>
+      </button>`;
+  });
+
+  // Fake station object so loadHistory / chart reuse works as-is
+  const camsStation = {
+    id:          `cams_${cell.lat}_${cell.lon}`,
+    source:      "CAMS",
+    name:        `${cell.lat.toFixed(2)}°N, ${cell.lon.toFixed(2)}°E`,
+    lat:         cell.lat,
+    lon:         cell.lon,
+    aqi:         level,
+    color:       color,
+    sensor_type: "CAMS model",
+    vendor:      t("camsVendor"),
+  };
+
+  content.innerHTML = `
+    <div class="p-source">${t("camsSource")}</div>
+    <div class="p-name">${camsStation.name}</div>
+    <div class="p-aqi-badge" style="background:${color};color:${level && level <= 3 ? '#111' : '#fff'}">
+      <span class="p-aqi-value">${level || "–"}</span>
+      <span>${levelLabel}</span>
+    </div>
+    <div class="p-readings">${readingsHtml || `<div class="p-reading" style="grid-column:1/-1"><div class="p-reading-label">${t("noData")}</div></div>`}</div>
+    <div class="p-meta">
+      <strong>${t("sensorType")}:</strong> ${camsStation.sensor_type}<br>
+      <strong>${t("vendor")}:</strong> ${camsStation.vendor}
+    </div>
+    <div class="p-chart-title">–</div>
+    <div class="p-chart-wrap" id="chart-wrap"><canvas id="sparkline"></canvas></div>
+    <div id="chart-status" class="p-no-history" style="display:none"></div>
+    ${buildEaqiTable()}
+  `;
+
+  // Wire reading buttons
+  content.querySelectorAll("button.p-reading").forEach(btn => {
+    btn.addEventListener("click", () => {
+      content.querySelectorAll("button.p-reading").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const param = btn.dataset.param;
+      const unit  = btn.dataset.unit;
+      const titleEl = content.querySelector(".p-chart-title");
+      if (titleEl) titleEl.textContent = `${param} – ${t("history")}`;
+      loadHistory(camsStation, param, unit);
+    });
+  });
+
+  // Auto-select PM2.5
+  const firstBtn = content.querySelector('button.p-reading[data-param="PM2.5"]')
+                || content.querySelector("button.p-reading");
+  if (firstBtn) firstBtn.click();
+}
+
+async function toggleCams() {
+  const btn = document.getElementById("btn-cams");
+  if (camsVisible) {
+    // ── Turn OFF ──────────────────────────────────────────────────────────
+    if (camsClickHandler) { map.off("click", camsClickHandler); camsClickHandler = null; }
+    if (camsLayer) { camsLayer.remove(); camsLayer = null; }
+    camsVisible = false;
+    btn.classList.remove("active");
+    document.getElementById("cams-note")?.remove();
+    closePanel();                     // close any open CAMS pixel panel
+    markerLayer.addTo(map);           // restore station markers
+    return;
+  }
+
+  // ── Turn ON ───────────────────────────────────────────────────────────
+  btn.disabled = true;
+  btn.textContent = t("camsLoading");
+
+  try {
+    if (!sloveniaGeoJSON) {
+      const r = await fetch("/static/slovenia.geojson");
+      sloveniaGeoJSON = await r.json();
+    }
+    const r    = await fetch("/api/cams");
+    const data = await r.json();
+
+    markerLayer.remove();             // hide station markers
+    camsLayer   = new CAMSLayer(data).addTo(map);
+    camsVisible = true;
+    btn.classList.add("active");
+
+    // Handle pixel clicks via Leaflet's own event system (canvas pointer-events
+    // are blocked by Leaflet CSS, so we use map.on("click") instead)
+    camsClickHandler = (e) => {
+      const half = camsLayer._data.cell_deg / 2;
+      const cell = camsLayer._data.points.find(pt =>
+        Math.abs(pt.lat - e.latlng.lat) <= half + 0.001 &&
+        Math.abs(pt.lon - e.latlng.lng) <= half + 0.001
+      );
+      if (cell) openCamsPanel(cell);
+    };
+    map.on("click", camsClickHandler);
+
+    let note = document.getElementById("cams-note");
+    if (!note) {
+      note = document.createElement("div");
+      note.id = "cams-note";
+      document.getElementById("map-wrap").appendChild(note);
+    }
+    note.textContent = t("camsLabel");
+  } catch (e) {
+    console.error("CAMS load failed", e);
+    markerLayer.addTo(map);           // restore markers if load failed
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t("camsBtn");
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

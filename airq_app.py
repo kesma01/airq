@@ -964,6 +964,54 @@ def _collector_loop():
         time.sleep(wait)
         _run_collection()
 
+# ── CAMS model grid ───────────────────────────────────────────────────────────
+# Slovenia bbox: lat 45.25–46.75, lon 13.25–16.75, 0.25° grid → 7×15 = 105 pts
+_CAMS_LATS = [round(45.25 + i * 0.25, 2) for i in range(7)]
+_CAMS_LONS = [round(13.25 + i * 0.25, 2) for i in range(15)]
+_cams_grid_cache: dict = {"data": None, "ts": 0.0}
+_cams_grid_lock = threading.Lock()
+CAMS_GRID_TTL = 3600  # refresh once per hour
+
+# Open-Meteo param name → (our label, unit)
+_OM_PARAMS = {
+    "pm2_5":             ("PM2.5", "µg/m³"),
+    "pm10":              ("PM10",  "µg/m³"),
+    "nitrogen_dioxide":  ("NO₂",   "µg/m³"),
+    "ozone":             ("O₃",    "µg/m³"),
+    "sulphur_dioxide":   ("SO₂",   "µg/m³"),
+}
+_OM_URL_PARAMS = ",".join(_OM_PARAMS.keys())
+
+def _fetch_cams_point(lat, lon):
+    url = (
+        "https://air-quality-api.open-meteo.com/v1/air-quality"
+        f"?latitude={lat}&longitude={lon}"
+        f"&hourly={_OM_URL_PARAMS}"
+        "&forecast_days=1&past_days=0&timezone=UTC"
+    )
+    try:
+        r = requests.get(url, timeout=10)
+        d = r.json()
+        times = d["hourly"]["time"]
+        now_h = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:00")
+        idx = next((i for i, t in enumerate(times) if t >= now_h), len(times) - 1)
+        vals = {
+            label: (d["hourly"].get(om_key) or [None] * len(times))[idx]
+            for om_key, (label, _) in _OM_PARAMS.items()
+        }
+        levels = [lv for lv in (_eaqi_level(p, v) for p, v in vals.items()) if lv]
+        level  = max(levels) if levels else None
+        qi     = _eaqi_qi(level)
+        return {
+            "lat": lat, "lon": lon,
+            "level": level, "color": qi["color"],
+            "pm25": vals["PM2.5"], "pm10": vals["PM10"],
+            "no2":  vals["NO₂"],  "o3":   vals["O₃"],
+            "so2":  vals["SO₂"],
+        }
+    except Exception as e:
+        return {"lat": lat, "lon": lon, "level": None, "color": "#aaaaaa"}
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -982,6 +1030,95 @@ def stations():
         "stations":    snap["stations"],
         "collected_at": ts.strftime("%Y-%m-%dT%H:%M:%SZ") if ts else None,
         "total":       snap["total"],
+    })
+
+@app.route("/api/cams")
+def cams_grid():
+    with _cams_grid_lock:
+        if _cams_grid_cache["data"] and time.time() - _cams_grid_cache["ts"] < CAMS_GRID_TTL:
+            return jsonify(_cams_grid_cache["data"])
+
+    coords = [(lat, lon) for lat in _CAMS_LATS for lon in _CAMS_LONS]
+    points = []
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        futs = {ex.submit(_fetch_cams_point, lat, lon): (lat, lon) for lat, lon in coords}
+        for f in as_completed(futs):
+            points.append(f.result())
+
+    result = {
+        "points":     points,
+        "cell_deg":   0.25,
+        "fetched_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    with _cams_grid_lock:
+        _cams_grid_cache["data"] = result
+        _cams_grid_cache["ts"]   = time.time()
+    return jsonify(result)
+
+@app.route("/api/cams/history")
+def cams_point_history():
+    """Return 24 h hourly CAMS history for one grid point (all 5 EAQI params).
+    Also computes EAQI: PM2.5/PM10 from 24-h mean, gases from latest hourly."""
+    try:
+        lat = float(request.args["lat"])
+        lon = float(request.args["lon"])
+    except (KeyError, ValueError):
+        return jsonify({"error": "lat and lon required"}), 400
+
+    url = (
+        "https://air-quality-api.open-meteo.com/v1/air-quality"
+        f"?latitude={lat}&longitude={lon}"
+        f"&hourly={_OM_URL_PARAMS}"
+        "&past_days=1&forecast_days=0&timezone=UTC"
+    )
+    try:
+        r = requests.get(url, timeout=15)
+        d = r.json()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+    hourly = d.get("hourly", {})
+    times  = hourly.get("time", [])
+
+    # Build per-param series {type, unit, points:[{t,v}]}
+    series = []
+    for om_key, (label, unit) in _OM_PARAMS.items():
+        vals = hourly.get(om_key) or [None] * len(times)
+        pts  = [{"t": t + ":00Z", "v": v} for t, v in zip(times, vals)]
+        series.append({"type": label, "unit": unit, "points": pts})
+
+    # EAQI: PM* from 24-h mean, gases from latest non-null value
+    now_h = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:00")
+    latest_idx = next((i for i, t in enumerate(times) if t >= now_h), len(times) - 1)
+
+    def mean_nonnull(lst):
+        v = [x for x in lst if x is not None]
+        return sum(v) / len(v) if v else None
+
+    def latest_nonnull(lst, idx):
+        # walk backwards from idx to find first non-null
+        for i in range(idx, -1, -1):
+            if lst[i] is not None:
+                return lst[i]
+        return None
+
+    eaqi_inputs = {}
+    for om_key, (label, _) in _OM_PARAMS.items():
+        vals = hourly.get(om_key) or [None] * len(times)
+        if label in ("PM2.5", "PM10"):
+            eaqi_inputs[label] = mean_nonnull(vals)
+        else:
+            eaqi_inputs[label] = latest_nonnull(vals, latest_idx)
+
+    levels = [lv for lv in (_eaqi_level(p, v) for p, v in eaqi_inputs.items()) if lv]
+    level  = max(levels) if levels else None
+    qi     = _eaqi_qi(level)
+
+    return jsonify({
+        "series":    series,
+        "eaqi":      {"level": level, "color": qi["color"], "label": qi["label"]},
+        "vals":      eaqi_inputs,
+        "fetched_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
     })
 
 @app.route("/api/history/<station_id>")
