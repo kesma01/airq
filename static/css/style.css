@@ -41,45 +41,59 @@ body {
 /* ── Header ──────────────────────────────────────────────────────────────── */
 #header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 16px;
-  min-height: 46px;
+  flex-direction: column;
+  padding: 5px 14px 6px;
   background: var(--card);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  flex-wrap: wrap;
-  gap: 6px 10px;
   z-index: 1000;
   box-shadow: var(--shadow);
 }
 
-#header-left {
+/* Row 1: buttons right-aligned */
+#header-top {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
+  justify-content: flex-end;
+  margin-bottom: 4px;
 }
-
-#title {
-  font-size: 1rem;
-  font-weight: 700;
-  white-space: nowrap;
-  color: var(--text);
-}
-
-#subtitle {
-  font-size: 0.72rem;
-  color: var(--subtext);
-  white-space: nowrap;
-  display: none;
-}
-@media (min-width: 860px) { #subtitle { display: inline; } }
 
 #header-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+}
+
+/* Row 2: title + legend */
+#header-bottom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+#header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+#title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+#subtitle {
+  font-size: 0.65rem;
+  color: var(--subtext);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Legend ──────────────────────────────────────────────────────────────── */
@@ -89,15 +103,15 @@ body {
   align-items: center;
   overflow-x: auto;
   flex: 1;
-  justify-content: center;
-  /* on mobile this row spans full width below title+buttons */
+  justify-content: flex-start;
+  -webkit-overflow-scrolling: touch;
 }
 
 .leg {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   color: var(--subtext);
   white-space: nowrap;
 }
@@ -110,49 +124,16 @@ body {
   flex-shrink: 0;
 }
 
-/* Mobile: push legend onto its own row */
+/* Mobile tweaks */
 @media (max-width: 640px) {
-  #header {
-    padding: 6px 12px;
-  }
-  /* Stack title + subtitle vertically so the full title always fits */
-  #header-left {
-    flex: 1;
-    min-width: 0;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1px;
-  }
-  #title {
-    font-size: 0.85rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
-  /* Show sources below the title on mobile */
-  #subtitle {
-    display: block;
-    font-size: 0.55rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
-  #legend {
-    order: 10;          /* after header-right */
-    width: 100%;
-    flex: none;
-    justify-content: flex-start;
-    padding-bottom: 2px;
-    gap: 6px;
-    -webkit-overflow-scrolling: touch;
-  }
-  .leg { font-size: 0.65rem; }
-  /* Tighten header-right so more space is left for the title */
-  #header-right { gap: 4px; }
-  .icon-btn { padding: 3px 6px; font-size: 0.68rem; }
+  #header { padding: 4px 10px 5px; }
+  #header-top { margin-bottom: 3px; }
+  #title { font-size: 0.82rem; }
+  #subtitle { font-size: 0.55rem; }
+  .icon-btn { padding: 3px 6px; font-size: 0.65rem; }
   .icon-link { padding: 3px 5px; }
+  #legend { gap: 5px; }
+  .leg { font-size: 0.6rem; }
 }
 
 /* ── Icon buttons (theme / lang) ────────────────────────────────────────── */
