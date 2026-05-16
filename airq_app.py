@@ -983,22 +983,40 @@ _OM_PARAMS = {
 _OM_URL_PARAMS = ",".join(_OM_PARAMS.keys())
 
 def _fetch_cams_point(lat, lon):
+    """Fetch current EAQI for one grid cell using EU-standard averaging:
+       PM2.5 / PM10 → 24-hour running mean; O₃, NO₂, SO₂ → latest hourly value."""
     url = (
         "https://air-quality-api.open-meteo.com/v1/air-quality"
         f"?latitude={lat}&longitude={lon}"
         f"&hourly={_OM_URL_PARAMS}"
-        "&forecast_days=1&past_days=0&timezone=UTC"
+        "&forecast_days=0&past_days=1&timezone=UTC"
     )
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, timeout=20)
         d = r.json()
-        times = d["hourly"]["time"]
-        now_h = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:00")
-        idx = next((i for i, t in enumerate(times) if t >= now_h), len(times) - 1)
-        vals = {
-            label: (d["hourly"].get(om_key) or [None] * len(times))[idx]
-            for om_key, (label, _) in _OM_PARAMS.items()
-        }
+        hourly = d["hourly"]
+        times  = hourly["time"]
+        now_h  = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:00")
+        latest_idx = next((i for i, t in enumerate(times) if t >= now_h), len(times) - 1)
+
+        def mean_nonnull(lst):
+            v = [x for x in lst if x is not None]
+            return sum(v) / len(v) if v else None
+
+        def latest_nonnull(lst, idx):
+            for i in range(idx, -1, -1):
+                if lst[i] is not None:
+                    return lst[i]
+            return None
+
+        vals = {}
+        for om_key, (label, _) in _OM_PARAMS.items():
+            raw = hourly.get(om_key) or [None] * len(times)
+            if label in ("PM2.5", "PM10"):
+                vals[label] = mean_nonnull(raw)          # 24-h mean (EU standard)
+            else:
+                vals[label] = latest_nonnull(raw, latest_idx)  # latest hourly
+
         levels = [lv for lv in (_eaqi_level(p, v) for p, v in vals.items()) if lv]
         level  = max(levels) if levels else None
         qi     = _eaqi_qi(level)
@@ -1040,7 +1058,7 @@ def cams_grid():
 
     coords = [(lat, lon) for lat in _CAMS_LATS for lon in _CAMS_LONS]
     points = []
-    with ThreadPoolExecutor(max_workers=20) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         futs = {ex.submit(_fetch_cams_point, lat, lon): (lat, lon) for lat, lon in coords}
         for f in as_completed(futs):
             points.append(f.result())

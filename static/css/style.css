@@ -54,7 +54,7 @@ body {
 #header-top {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 #header-right {
@@ -63,19 +63,11 @@ body {
   gap: 5px;
 }
 
-/* Row 2: title + legend */
-#header-bottom {
+/* Row 2: title + subtitle */
+#header-middle {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-#header-left {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex-shrink: 0;
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -83,9 +75,8 @@ body {
   font-size: 0.95rem;
   font-weight: 700;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--text);
+  flex-shrink: 0;
 }
 
 #subtitle {
@@ -96,13 +87,12 @@ body {
   text-overflow: ellipsis;
 }
 
-/* ── Legend ──────────────────────────────────────────────────────────────── */
+/* ── Legend (row 3) ──────────────────────────────────────────────────────── */
 #legend {
   display: flex;
   gap: 8px;
   align-items: center;
   overflow-x: auto;
-  flex: 1;
   justify-content: flex-start;
   -webkit-overflow-scrolling: touch;
 }
@@ -127,7 +117,8 @@ body {
 /* Mobile tweaks */
 @media (max-width: 640px) {
   #header { padding: 4px 10px 5px; }
-  #header-top { margin-bottom: 3px; }
+  #header-top { margin-bottom: 2px; }
+  #header-middle { gap: 5px; margin-bottom: 1px; }
   #title { font-size: 0.82rem; }
   #subtitle { font-size: 0.55rem; }
   .icon-btn { padding: 3px 6px; font-size: 0.65rem; }
